@@ -1,5 +1,58 @@
 import re
 import os
+import numpy as np
+
+def kl(p,q,alpha=0):
+	'''
+	Returns the KL distance between the two distributions p1 and p2. In case the parameter "alpha" is >0, it returns a smoothed version of the KL distance [Steck18].
+	If the KL distance diverges (becomes inf) then the function returns the value np.nan
+
+	[Steck18] Harald Steck. 2018. Calibrated recommendations. In ACM RecSys. ACM, 154–162
+	'''
+	d = [np.nan]*len(p) # initialize the list with the kl distance per item in the distribution
+	q_smooth = [(1-alpha)*q[i]+ alpha*p[i]  for i in range(len(p))]
+	for i in range(len(p)):
+		if p[i]==0:
+			d[i] = [0]
+		else:
+			if q_smooth[i]==0:
+				d[i] = np.nan # the KL metrics diverges (becomes inf)
+			else:
+				d[i] = p[i]*np.log(p[i]/q_smooth[i])
+	if alpha==0:
+		return np.sum(d)
+	else:
+		return np.sum(d) / np.log(1/alpha)
+    
+def p_fairness(pNA,pBS,metric):
+	'''
+	This method receives two lists, representing content demand distributions (p[i] is the fraction of demand for the i^{th} content), 
+	and a string that denotes which fairness measure will be used, 
+	and returns a value for the fairness measure (or, "difference") of the given lists
+	Input:
+		pNA: a list of the first content demand distribution; this correspongs to the network-aware (NA) RS case
+		pBS: a list of the second content demand distribution (should be of the same length with pNA); this correspongs to the baseline (BS) RS case
+		metric: a string to denote which fairness measure to be used; it can take values {'avg', 'sum', 'max', 'kl', 'kl-smooth'}
+
+	'''
+	if metric=='avg':
+		f = 0.5 * np.sum([np.abs(pNA[i]-pBS[i]) for i in range(len(pNA))])
+	elif metric=='sum':
+		f = np.sum([np.abs(pNA[i]-pBS[i]) for i in range(len(pNA))])
+	elif metric=='max':
+		r = [np.abs(pNA[i]-pBS[i]) for i in range(len(pNA))]
+		f = np.max([np.abs(pNA[i]-pBS[i]) for i in range(len(pNA))])
+	elif metric=='kl':
+		f = kl(pNA,pBS)
+	elif metric=='kl-inv':
+		f = kl(pBS,pNA)
+	elif metric=='kl-smooth':
+		f = kl(pNA,pBS,alpha=0.01)
+	elif metric=='kl-smooth-inv':
+		f = kl(pBS,pNA,alpha=0.01)
+	else:
+		raise ValueError('The given metric "{}" is not within the available options'.format(metric))
+	return f
 
 def match_regex_array(files, regex):
     matches = [re.findall(regex, f) for f in files]
