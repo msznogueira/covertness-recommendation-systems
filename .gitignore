@@ -1,2 +1,4 @@
 *.cpython
 *.pyc
+*.pdf
+*.csv
