@@ -486,68 +486,121 @@ def cabaret(u, N, W_bfs, D_bfs, cache_set):
     return R
 
 
-def compute_policy(cost_UNcached, lam, u, N, p0, cache, qmax_vector, qref, alpha, case):
+def _policy_digest(R, decimals=10):
+    Rq = np.round(np.asarray(R, dtype=np.float64), decimals=decimals)
+    return hashlib.blake2b(Rq.tobytes(), digest_size=16).hexdigest()
 
+
+def compute_policy(
+    cost_UNcached, lam, u, N, p0, cache, qmax_vector, qref, alpha, case,
+    max_iter=500,
+    verbose=True,
+    detect_cycles=True,
+    return_best_on_cycle=True,
+    tie_break_eps=1e-10,
+):
+    """
+    Safer version of the old policy iteration.
+
+    Why this exists:
+      - The original loop has no max_iter.
+      - With high alpha/lambda and degenerate inner LPs, policy improvement can cycle.
+      - Returning the best policy seen is safer than hanging forever.
+    """
     K = len(p0)
     cost_cached = 0.0
 
-    x = cost_UNcached*np.ones(K)
+    x = cost_UNcached * np.ones(K)
     x[cache] = cost_cached
 
-    # initialise the policy evaluation loop
-    policy_convergent = False
-    R = topN(N,u)
-
+    R = topN(N, u)
+    R_old = np.ones((K, K))
     value_old = np.ones(K)
-    R_old = np.ones([K,K])
+
+    def score_policy(R_candidate):
+        # Expected uncached cost under stationary demand. Smaller is better.
+        try:
+            pi = compute_pi(R_candidate, p0, alpha, N)
+            return float(np.dot(pi, x))
+        except Exception:
+            return float("inf")
+
+    best_R = copy.deepcopy(R)
+    best_score = score_policy(R)
+    seen = {}
 
     if case == "model1":
-
         eps1 = 0.01
         eps2 = 0.001
-        while policy_convergent == False:
 
-            # Policy evaluation step
-            value = policy_evaluation(lam, alpha, N, cache, cost_UNcached, p0, u, qmax_vector, R, "model1")
+        for it in range(1, max_iter + 1):
+            value = policy_evaluation(
+                lam, alpha, N, cache, cost_UNcached, p0, u, qmax_vector, R, "model1"
+            )
 
-            # Parallel Optimization for the value vactor you found
             num_cores = multiprocessing.cpu_count()
-            # Inside the delayed you have to use either mdp_inner_minimizer_cplex_user1 or mdp_inner_minimizer_scipy_user1
-            res_parallel = Parallel(n_jobs = num_cores)(delayed(mdp_inner_minimizer_scipy_user1)(k, K, N, value, qref, qmax_vector, u[k,:]) for k in range(K))
-            for k in range(K):
-                R[k,:] = res_parallel[k]
+            res_parallel = Parallel(n_jobs=num_cores)(
+                delayed(mdp_inner_minimizer_scipy_user1)(
+                    k, K, N, value, qref, qmax_vector, u[k, :],
+                    previous_r=R[k, :],
+                    tie_break_eps=tie_break_eps,
+                )
+                for k in range(K)
+            )
+            R_new = np.vstack(res_parallel)
 
-            diff1 = abs(np.linalg.norm(R - R_old))
-            diff2 = np.linalg.norm(value - value_old, 2)
-            #print(diff1)
-            #print(diff2)
+            diff1 = float(np.linalg.norm(R_new - R_old))
+            diff2 = float(np.linalg.norm(value - value_old, 2))
+            current_score = score_policy(R_new)
 
-            policy_convergent = (diff1 < eps1) or (diff2 < eps2)
+            if current_score < best_score:
+                best_score = current_score
+                best_R = copy.deepcopy(R_new)
+
+            if verbose and (it == 1 or it % 10 == 0):
+                print(
+                    f"compute_policy iter={it} "
+                    f"diff_R={diff1:.6g} diff_value={diff2:.6g} "
+                    f"uncached_cost={current_score:.10g} best={best_score:.10g}",
+                    flush=True,
+                )
+
+            if (diff1 < eps1) or (diff2 < eps2):
+                if verbose:
+                    print(
+                        f"compute_policy converged at iter={it}: "
+                        f"diff_R={diff1:.6g}, diff_value={diff2:.6g}",
+                        flush=True,
+                    )
+                return R_new
+
+            if detect_cycles:
+                key = _policy_digest(R_new, decimals=10)
+                if key in seen:
+                    msg = (
+                        f"compute_policy cycle detected: iter {seen[key]} -> {it}; "
+                        f"returning best policy seen with uncached_cost={best_score:.10g}"
+                    )
+                    if return_best_on_cycle:
+                        print(msg, flush=True)
+                        return best_R
+                    raise RuntimeError(msg)
+                seen[key] = it
+
             R_old = copy.deepcopy(R)
+            R = R_new
             value_old = copy.deepcopy(value)
 
-        return R
+        msg = (
+            f"compute_policy did not converge after {max_iter} iterations; "
+            f"returning best policy seen with uncached_cost={best_score:.10g}"
+        )
+        if return_best_on_cycle:
+            print(msg, flush=True)
+            return best_R
+        raise RuntimeError(msg)
 
-
-    if case == "model2":
-
-        epsilon = 0.01
-        while (policy_convergent == False):
-
-            # Policy evaluation step
-            value = policy_evaluation(lam, alpha, N, cache, cost_UNcached, p0, u, qmax_vector, R, "model2")
-
-            # Parallel Optimization for the value vactor you found
-            num_cores = multiprocessing.cpu_count()
-            res_parallel = Parallel(n_jobs = num_cores)(delayed(mdp_inner_minimizer_sorting_user2)(p0, u[k,:], value, N, R[k,:], np.multiply(u[k,:], v) - np.dot(p0,v)*u[k,:], k) for k in range(K))
-            for k in range(K):
-                R[k,:] = res_parallel[k]
-
-            diff = abs(np.linalg.norm(R - R_old))
-            policy_convergent = diff < epsilon
-            R_old = copy.deepcopy(R)
-
-        return R#, (1-lam)*np.dot(p0.T, v)
+    raise NotImplementedError("This patch only replaces the model1 branch.")
 
 def policy_evaluation(lam, alpha, N, cache, cost_UNcached, p0, u, qmax_vector, R, case):
 
@@ -619,31 +672,31 @@ def hit(request, cache):
     return int(h == True)
 
 def mdp_inner_minimizer_scipy_user1(i, K, N, value, q_percentage, qmax_vector, u_i):
-    """SciPy version of the one-row MDP inner LP."""
-    value = np.asarray(value, dtype=float)
-    u_i = np.asarray(u_i, dtype=float)
-
-    A_eq = np.zeros((2, K), dtype=float)
+    A_eq = np.zeros((2, K))
     A_eq[0, :] = 1.0
     A_eq[1, i] = 1.0
-    b_eq = np.array([N, 0.0], dtype=float)
+    b_eq = [N, 0.0]
 
-    # QoR: sum_j r_j*u_ij >= q*qmax_i -> -sum_j r_j*u_ij <= -q*qmax_i
     A_ub = -u_i.reshape(1, K)
-    b_ub = np.array([-q_percentage * qmax_vector[i]], dtype=float)
+    b_ub = [-q_percentage * qmax_vector[i]]
 
-    result = linprog(
-        value,
+    bounds = [(0.0, 1.0)] * K
+
+    solvit = linprog(
+        c=value,
         A_ub=A_ub,
         b_ub=b_ub,
         A_eq=A_eq,
         b_eq=b_eq,
-        bounds=[(0.0, 1.0)] * K,
-        method="highs",
+        bounds=bounds,
+        method="highs-ds",
     )
-    if not result.success:
-        raise RuntimeError("linprog failed in mdp_inner_minimizer_scipy_user1: {}".format(result.message))
-    return np.around(result.x, decimals=3)
+
+    if not solvit.success:
+        raise RuntimeError(solvit.message)
+
+    return solvit.x
+
 
 
 def get_alpha_vector(R, u, qmax_vector):
