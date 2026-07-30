@@ -9,7 +9,7 @@ import time
 import numpy as np
 
 PY3_BIN			= 'python3'
-PY_SCRIPT 		= 'fair.py'
+PY_SCRIPT 		= 'fair_scipy.py'
 MAX_PROCESSES	= 1
 
 # SCENARIOS_TO_TEST = [\

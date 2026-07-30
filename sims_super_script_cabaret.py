@@ -9,7 +9,7 @@ import time
 
 
 PY3_BIN			= 'python3'
-PY_SCRIPT 		= 'fair.py'
+PY_SCRIPT 		= 'fair_scipy.py'
 MAX_PROCESSES	= 1
 
 U_MATRIX		= ['lastfm_U_matrix.mat', 'movielens1k_U_matrix.mat']
