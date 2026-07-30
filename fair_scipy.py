@@ -14,6 +14,8 @@ import multiprocessing
 import time
 import json
 from json import JSONEncoder
+import hashlib
+
 
 class NumpyArrayEncoder(JSONEncoder):
     def default(self, obj):
@@ -176,7 +178,7 @@ def lp_solver(item_cost, cache, N, q_percentage, qmax_vector, p0, pBS, alpha, u,
         A_eq=A_eq,
         b_eq=np.asarray(b_eq, dtype=float),
         bounds=bounds,
-        method=method,
+        method="highs-ipm",
     )
 
     if not result.success:
@@ -671,19 +673,37 @@ def hit(request, cache):
     h = request in cache
     return int(h == True)
 
-def mdp_inner_minimizer_scipy_user1(i, K, N, value, q_percentage, qmax_vector, u_i):
+def mdp_inner_minimizer_scipy_user1(
+    i,
+    K,
+    N,
+    value,
+    q_percentage,
+    qmax_vector,
+    u_i,
+    previous_r=None,
+    tie_break_eps=1e-8,
+):
+    
     A_eq = np.zeros((2, K))
     A_eq[0, :] = 1.0
     A_eq[1, i] = 1.0
-    b_eq = [N, 0.0]
+    b_eq = np.array([N, 0.0])
 
     A_ub = -u_i.reshape(1, K)
-    b_ub = [-q_percentage * qmax_vector[i]]
+    b_ub = np.array([-q_percentage * qmax_vector[i]])
 
     bounds = [(0.0, 1.0)] * K
 
-    solvit = linprog(
-        c=value,
+    c = np.asarray(value, dtype=float).copy()
+
+    # Tiny tie-break: among near-equivalent optima, prefer the previous row.
+    if previous_r is not None:
+        previous_r = np.asarray(previous_r, dtype=float)
+        c = c + tie_break_eps * (1.0 - previous_r)
+
+    res = linprog(
+        c=c,
         A_ub=A_ub,
         b_ub=b_ub,
         A_eq=A_eq,
@@ -692,10 +712,10 @@ def mdp_inner_minimizer_scipy_user1(i, K, N, value, q_percentage, qmax_vector, u
         method="highs-ds",
     )
 
-    if not solvit.success:
-        raise RuntimeError(solvit.message)
+    if not res.success:
+        raise RuntimeError(f"Inner LP failed for row {i}: {res.message}")
 
-    return solvit.x
+    return res.x
 
 
 
