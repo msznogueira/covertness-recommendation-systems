@@ -77,12 +77,12 @@ def lp_solver(
 
     def h_idx(i, j):
         nth_baseline_rec = np.sort(u[i, :])[-N]
-        qoe_deficit = nth_baseline_rec - u[i, j]
 
-        is_cached = j in cache
-        is_unsafe = qoe_deficit > qoe_tol
-
-        return float(is_cached and is_unsafe)
+        return float(
+            (j in cache)
+            and (nth_baseline_rec == 1.0)
+            and (u[i, j] == 0.0)
+        )
 
 
     # CPLEX code minimized delivery cost: cached items cost 0, uncached item_cost.
@@ -832,6 +832,8 @@ def main():
     # new added arguments
     parser.add_argument('-fairness_mode', '--fairness_mode', dest='fairness_mode', type=str)
     parser.add_argument('-fair_weight', '--weight', dest='weight', type=float)
+    parser.add_argument('-qoe_tol', '--qoe_tol', dest='qoe_tol', type=float)
+    parser.add_argument('-qoe_eps', '--qoe_eps', dest='qoe_eps', type=float)
     parser.add_argument('-cab', '--cabaret_parameters', dest='cab', nargs=2, metavar=('W_bfs', 'D_bfs'), help='The values for the width and depth of the BFS in the CABaRet algorithm.', type=int)
 
     args = parser.parse_args()
