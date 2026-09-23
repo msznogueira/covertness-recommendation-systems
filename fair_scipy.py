@@ -178,7 +178,7 @@ def lp_solver(item_cost, cache, N, q_percentage, qmax_vector, p0, pBS, alpha, u,
         A_eq=A_eq,
         b_eq=np.asarray(b_eq, dtype=float),
         bounds=bounds,
-        method="highs-ipm",
+        method="highs-ds",
     )
 
     if not result.success:
