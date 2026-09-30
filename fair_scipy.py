@@ -24,8 +24,25 @@ class NumpyArrayEncoder(JSONEncoder):
         return JSONEncoder.default(self, obj)
 
 
-def lp_solver(item_cost, cache, N, q_percentage, qmax_vector, p0, pBS, alpha, u, fairness_mode, weight,
-              *, kl_cut_max=8.0, kl_cut_step=0.05, method="highs"):
+def lp_solver(
+    item_cost,
+    cache,
+    N,
+    q_percentage,
+    qmax_vector,
+    p0,
+    pBS,
+    alpha,
+    u,
+    fairness_mode,
+    weight,
+    qoe_tol=0.2,
+    qoe_eps=0.1,
+    *,
+    kl_cut_max=8.0,
+    kl_cut_step=0.05,
+    method="highs",
+):
     """Solve the Fair-NFR LP with scipy.optimize.linprog.
 
     Variable layout:
@@ -57,6 +74,16 @@ def lp_solver(item_cost, cache, N, q_percentage, qmax_vector, p0, pBS, alpha, u,
 
     def z_idx(i):
         return lib_size + n_w + i
+
+    def h_idx(i, j):
+        nth_baseline_rec = np.sort(u[i, :])[-N]
+        qoe_deficit = nth_baseline_rec - u[i, j]
+
+        is_cached = j in cache
+        is_unsafe = qoe_deficit > qoe_tol
+
+        return float(is_cached and is_unsafe)
+
 
     # CPLEX code minimized delivery cost: cached items cost 0, uncached item_cost.
     # This is equivalent to maximizing cache-hit probability because sum_i p_i = 1.
@@ -123,6 +150,24 @@ def lp_solver(item_cost, cache, N, q_percentage, qmax_vector, p0, pBS, alpha, u,
         pi = p_idx(i)
         for j in range(lib_size):
             add_ub([w_idx(i, j), pi], [1.0, -1.0], 0.0)
+
+    # QoE constraint:
+    # (1/N) * sum_j h_ij r_ij <= qoe_eps
+    #
+    # Since w_ij = p_i r_ij:
+    # sum_j h_ij w_ij - qoe_eps*N*p_i <= 0
+    for i in range(lib_size):
+        unsafe = [
+            j for j in range(lib_size)
+            if h_idx(i, j) == 1.0
+        ]
+
+        if unsafe:
+            add_ub(
+                [w_idx(i, j) for j in unsafe] + [p_idx(i)],
+                [1.0] * len(unsafe) + [-qoe_eps * float(N)],
+                0.0,
+            )
 
     # Fairness constraints
     if fairness_mode in {"max", "perMax"}:
@@ -787,6 +832,8 @@ def main():
     # new added arguments
     parser.add_argument('-fairness_mode', '--fairness_mode', dest='fairness_mode', type=str)
     parser.add_argument('-fair_weight', '--weight', dest='weight', type=float)
+    parser.add_argument('-qoe_tol', '--qoe_tol', dest='qoe_tol', type=float)
+    parser.add_argument('-qoe_eps', '--qoe_eps', dest='qoe_eps', type=float)
     parser.add_argument('-cab', '--cabaret_parameters', dest='cab', nargs=2, metavar=('W_bfs', 'D_bfs'), help='The values for the width and depth of the BFS in the CABaRet algorithm.', type=int)
 
     args = parser.parse_args()
@@ -811,6 +858,10 @@ def main():
 
     # how much weight on the constraint, for w >= 1 the constraint is inactive
     weight = args.weight
+
+    # QoE tolerances
+    qoe_tol = args.qoe_tol
+    qoe_eps = args.qoe_eps
 
     # find top-N policy (according to U best items)
     R_top = topN(N, u)
@@ -842,7 +893,7 @@ def main():
         if fairness_mode is None:
             R_NA = compute_policy(content_cost, lam, u, N, p0, cache_set, qmax_vector, qref, alpha, "model1")
         else:
-            R_NA = lp_solver(content_cost, cache_set, N, qref, qmax_vector, p0, pi_bs, alpha, u, fairness_mode, weight)
+            R_NA = lp_solver(content_cost, cache_set, N, qref, qmax_vector, p0, pi_bs, alpha, u, fairness_mode, weight, qoe_tol, qoe_eps)
 
     pi_final_NA = compute_pi(R_NA, p0, alpha, N)
 
