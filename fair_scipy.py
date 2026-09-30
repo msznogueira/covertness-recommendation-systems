@@ -223,7 +223,7 @@ def lp_solver(
         A_eq=A_eq,
         b_eq=np.asarray(b_eq, dtype=float),
         bounds=bounds,
-        method="highs-ipm",
+        method="highs-ds",
     )
 
     if not result.success:
@@ -832,6 +832,8 @@ def main():
     # new added arguments
     parser.add_argument('-fairness_mode', '--fairness_mode', dest='fairness_mode', type=str)
     parser.add_argument('-fair_weight', '--weight', dest='weight', type=float)
+    parser.add_argument('-qoe_tol', '--qoe_tol', dest='qoe_tol', type=float)
+    parser.add_argument('-qoe_eps', '--qoe_eps', dest='qoe_eps', type=float)
     parser.add_argument('-cab', '--cabaret_parameters', dest='cab', nargs=2, metavar=('W_bfs', 'D_bfs'), help='The values for the width and depth of the BFS in the CABaRet algorithm.', type=int)
 
     args = parser.parse_args()
