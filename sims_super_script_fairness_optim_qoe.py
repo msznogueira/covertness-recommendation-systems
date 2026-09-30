@@ -99,12 +99,22 @@ for max_fairness_mode in F_MODES:
 		q = sc[1].split('/sim_results_')[1].split('_')[6][1:]
 		L = sc[1].split('/sim_results_')[1].split('_')[7][1:].split('.json')[0]
 		for f in F[max_fairness_mode]:
-			out_file = './sim_results/sim_results_U{}_pop{}_a{}_N{}_C{}_CP{}_Q{}_L{}_F{}{}_qoe.json'.format(U.split('_')[0], pop, a, N, C, cp, q, L, max_fairness_mode, f)
+			qoe_eps = 0.1
+			qoe_tol = 0.2
+			# qoe_eps, qoe_tol = 1, 1 # Sanity check (deactivate QoE constraint)
+
+			out_file = (
+				'./sim_results/'
+				'sim_results_U{}_pop{}_a{}_N{}_C{}_CP{}_Q{}_L{}_'
+				'F{}{}_qoeE{}_qoeT{}.json'
+			).format(
+				U.split('_')[0], pop, a, N, C, cp, q, L,
+				max_fairness_mode, f,
+				qoe_eps, qoe_tol
+			)
 			if os.path.exists(out_file):
 				print('This file already exists: {}'.format(out_file))
 				continue
-			qoe_tol = 0.2
-			qoe_eps = 0.1
 			cmd = '{} {} -U_related {} -popularity {} -clickthrough {} -batch_size {} -cache_size {} -cache {} -qref {} -session_length {} -o {} -fairness_mode {} -fair_weight {} -qoe_tol {} -qoe_eps {}'.format(PY3_BIN, PY_SCRIPT, U, pop, a, N, C, cp, q, L, out_file, max_fairness_mode, f, qoe_tol, qoe_eps)
 			while len(active_processes) >= MAX_PROCESSES:
 				for p in active_processes:
